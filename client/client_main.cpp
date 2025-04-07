@@ -19,7 +19,7 @@ int main()
 	}
 	std::cout << "Login successful!\n";
 
-	std::cin.ignore(); // Clear newline character
+	std::cin.ignore(); // Clear newline character this is interesting
 	std::string line;
 	while (true)
 	{
@@ -64,6 +64,7 @@ int main()
 			std::string path;
 			size_t offset, length;
 			iss >> path >> offset >> length;
+			// The Namespace Server forwards the read request to the appropriate file server.
 			std::string resp = client.readFile(path, offset, length);
 			std::cout << resp << "\n";
 		}
@@ -75,6 +76,7 @@ int main()
 			std::string data;
 			std::getline(iss, data);
 			data = trim(data);
+			// The Namespace Server forwards the write request to the appropriate file server.
 			std::string resp = client.writeFile(path, offset, data);
 			std::cout << resp << "\n";
 		}

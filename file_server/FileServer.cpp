@@ -12,13 +12,19 @@
 #include <cstring>
 #include <sys/stat.h>
 
+// FileServer constructor: accepts a storage directory prefix.
+// (The actual storage directory will be updated in run() based on the port number.)
 FileServer::FileServer(const std::string &storageDir)
 	: storageDirectory(storageDir)
 {
-	// Ensure the storage directory exists.
-	mkdir(storageDirectory.c_str(), 0777);
+	// Initially, we just store the provided prefix.
+	// The final directory will be set in run() using the port number.
 }
 
+// Reads a file from storageDirectory + path.
+// The offset and length specify the part of the file to read.
+// If the file does not exist, returns an error.
+// Output format: "DATA <no of bytes read> <data>"
 std::string FileServer::readFile(const std::string &path, size_t offset, size_t length)
 {
 	std::string fullPath = storageDirectory + path;
@@ -36,10 +42,14 @@ std::string FileServer::readFile(const std::string &path, size_t offset, size_t 
 	return "DATA " + std::to_string(bytesRead) + " " + data;
 }
 
+// Writes data to a file at storageDirectory + path.
+// The offset is used to write at a specific position.
+// If the file does not exist, it is created.
+// Output format: "OK <no of bytes written>".
 std::string FileServer::writeFile(const std::string &path, size_t offset, const std::string &data)
 {
 	std::string fullPath = storageDirectory + path;
-	// Open the file in read/write mode, create if it doesn't exist.
+	// Open the file in read/write mode; if it doesn't exist, create it.
 	std::fstream out;
 	out.open(fullPath, std::ios::in | std::ios::out | std::ios::binary);
 	if (!out.is_open())
@@ -60,6 +70,7 @@ std::string FileServer::writeFile(const std::string &path, size_t offset, const 
 	return "OK " + std::to_string(data.size());
 }
 
+// Processes a request string from the client and returns the appropriate response.
 std::string FileServer::handleRequest(const std::string &request)
 {
 	// Expected formats:
@@ -82,7 +93,6 @@ std::string FileServer::handleRequest(const std::string &request)
 		iss >> path >> offset;
 		std::string data;
 		std::getline(iss, data);
-		data = trim(data);
 		return writeFile(path, offset, data);
 	}
 	else if (command == "CREATE")
@@ -90,7 +100,21 @@ std::string FileServer::handleRequest(const std::string &request)
 		// Create an empty file.
 		std::string path;
 		iss >> path;
-		std::string fullPath = storageDirectory + path;
+
+		char cwd[100];
+		if (getcwd(cwd, sizeof(cwd)) == nullptr)
+		{
+			return "ERR CannotDetermineCWD";
+		}
+		// Construct the full path as: <cwd>/<storageDirectory>/<path>
+		std::string fullPath = std::string(cwd) + "/" + storageDirectory + path;
+		std::cout<<"Full path: "<<fullPath<<std::endl;
+		// If the provided file path does not begin with a '/', add one.
+		// if (!path.empty() && path[0] != '/')
+		// 	fullPath += "/" + path;
+		// else
+		// 	fullPath += path;
+
 		std::ofstream ofs(fullPath, std::ios::binary);
 		if (ofs)
 		{
@@ -102,22 +126,31 @@ std::string FileServer::handleRequest(const std::string &request)
 			return "ERR CannotCreateFile";
 		}
 	}
+
 	return "ERR UnknownCommand";
 }
 
+// Processes client requests on the given socket.
 void FileServer::processRequest(int clientSock)
 {
 	std::string line;
-	while (readLine(clientSock, line) > 0)
+	while (readMessage(clientSock, line) > 0)
 	{
 		std::cout << "FileServer received: " << line << "\n";
 		std::string response = handleRequest(line);
-		sendLine(clientSock, response);
+		sendMessage(clientSock, response);
 	}
 }
 
+// Runs the file server on the given port.
+// Before binding the socket, the storage directory is updated to include a port-specific subdirectory.
 void FileServer::run(int port)
 {
+	// Append a port-specific subdirectory.
+	// storageDirectory = "/server" + std::to_string(port);
+	// Ensure the directory exists.
+	mkdir(storageDirectory.c_str(), 0777);
+
 	int sockfd, newsockfd;
 	struct sockaddr_in serv_addr, cli_addr;
 	socklen_t clilen;

@@ -7,6 +7,7 @@
 #include <algorithm>
 
 // Trim whitespace from both ends of a string.
+// not needed yet
 inline std::string trim(const std::string &s)
 {
 	size_t start = s.find_first_not_of(" \n\r\t");

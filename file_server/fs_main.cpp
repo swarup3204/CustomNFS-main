@@ -5,7 +5,7 @@
 int main(int argc, char *argv[])
 {
 	int port = 4001;
-	std::string storageDir = "file_server/storage";
+	std::string storageDir = "storage";
 	if (argc > 1)
 	{
 		port = std::atoi(argv[1]);

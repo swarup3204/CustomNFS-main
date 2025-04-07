@@ -10,6 +10,7 @@
 #include <iostream>
 #include <sstream>
 
+// Helper function to send a request to the specified host and port.
 std::string Client::sendRequest(const std::string &host, int port, const std::string &request)
 {
 	int sockfd;
@@ -32,9 +33,9 @@ std::string Client::sendRequest(const std::string &host, int port, const std::st
 		close(sockfd);
 		return "ERR ConnectionFailed";
 	}
-	sendLine(sockfd, request);
+	sendMessage(sockfd, request);
 	std::string response;
-	readLine(sockfd, response);
+	readMessage(sockfd, response);
 	close(sockfd);
 	return response;
 }
@@ -77,14 +78,14 @@ std::string Client::deletePath(const std::string &path)
 
 std::string Client::readFile(const std::string &path, size_t offset, size_t length)
 {
-	// For simplicity, we assume the file is on Server1 at port 4001.
+	// The request is sent to the Namespace Server, which forwards it to the appropriate file server.
 	std::string req = "READ " + path + " " + std::to_string(offset) + " " + std::to_string(length);
 	return sendRequest(nsHost, nsPort, req);
 }
 
 std::string Client::writeFile(const std::string &path, size_t offset, const std::string &data)
 {
-	// For simplicity, we assume the file is on Server1 at port 4001.
+	// The request is sent to the Namespace Server, which forwards it to the appropriate file server.
 	std::string req = "WRITE " + path + " " + std::to_string(offset) + " " + data;
 	return sendRequest(nsHost, nsPort, req);
 }
