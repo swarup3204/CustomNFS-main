@@ -33,6 +33,8 @@ private:
 	// Helper functions for file I/O.
 	std::string readFile(const std::string &path, size_t offset, size_t length);
 	std::string writeFile(const std::string &path, size_t offset, const std::string &data);
+	std::string deleteFile(const std::string &path);
+	std::string createFile(const std::string &path);
 };
 
 #endif // FILE_SERVER_H

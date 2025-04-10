@@ -18,7 +18,7 @@ CLIENT_TARGET = Client
 # CONCURRENCY_TARGET = ConcurrencyDemo
 
 # Source files
-NS_SRC = $(NS_DIR)/ns_main.cpp $(NS_DIR)/NamespaceServer.cpp $(COMMON_DIR)/util.cpp
+NS_SRC = $(NS_DIR)/ns_main.cpp $(NS_DIR)/NamespaceServer.cpp $(COMMON_DIR)/util.cpp -lcrypto
 FS_SRC = $(FS_DIR)/fs_main.cpp $(FS_DIR)/FileServer.cpp $(COMMON_DIR)/util.cpp
 CLIENT_SRC = $(CLIENT_DIR)/client_main.cpp $(CLIENT_DIR)/Client.cpp $(COMMON_DIR)/util.cpp
 # EXTRAS_SRC = $(EXTRAS_DIR)/concurrency_demo.cpp $(COMMON_DIR)/util.cpp

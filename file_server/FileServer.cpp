@@ -11,28 +11,33 @@
 #include <arpa/inet.h>
 #include <cstring>
 #include <sys/stat.h>
+#include <errno.h>
+
+// Helper function to extract the basename from a path.
+static std::string getBaseName(const std::string &path)
+{
+	size_t pos = path.find_last_of('/');
+	if (pos == std::string::npos)
+		return path;
+	return path.substr(pos + 1);
+}
 
 // FileServer constructor: accepts a storage directory prefix.
-// (The actual storage directory will be updated in run() based on the port number.)
 FileServer::FileServer(const std::string &storageDir)
 	: storageDirectory(storageDir)
 {
-	// Initially, we just store the provided prefix.
-	// The final directory will be set in run() using the port number.
+	// Ensure the base storage directory exists.
+	mkdir(storageDirectory.c_str(), 0777);
 }
 
-// Reads a file from storageDirectory + path.
-// The offset and length specify the part of the file to read.
-// If the file does not exist, returns an error.
-// Output format: "DATA <no of bytes read> <data>"
+// Reads a file from storageDirectory using only the file's basename.
 std::string FileServer::readFile(const std::string &path, size_t offset, size_t length)
 {
-	std::string fullPath = storageDirectory + path;
+	std::string fileName = getBaseName(path);
+	std::string fullPath = storageDirectory + "/" + fileName;
 	std::ifstream in(fullPath, std::ios::binary);
 	if (!in)
-	{
 		return "ERR FileNotFound";
-	}
 	in.seekg(offset, std::ios::beg);
 	char *buffer = new char[length];
 	in.read(buffer, length);
@@ -42,14 +47,11 @@ std::string FileServer::readFile(const std::string &path, size_t offset, size_t 
 	return "DATA " + std::to_string(bytesRead) + " " + data;
 }
 
-// Writes data to a file at storageDirectory + path.
-// The offset is used to write at a specific position.
-// If the file does not exist, it is created.
-// Output format: "OK <no of bytes written>".
+// Writes data to a file in storageDirectory using only the file's basename.
 std::string FileServer::writeFile(const std::string &path, size_t offset, const std::string &data)
 {
-	std::string fullPath = storageDirectory + path;
-	// Open the file in read/write mode; if it doesn't exist, create it.
+	std::string fileName = getBaseName(path);
+	std::string fullPath = storageDirectory + "/" + fileName;
 	std::fstream out;
 	out.open(fullPath, std::ios::in | std::ios::out | std::ios::binary);
 	if (!out.is_open())
@@ -59,9 +61,7 @@ std::string FileServer::writeFile(const std::string &path, size_t offset, const 
 		out.close();
 		out.open(fullPath, std::ios::in | std::ios::out | std::ios::binary);
 		if (!out.is_open())
-		{
 			return "ERR CannotOpenFile";
-		}
 	}
 	out.seekp(offset, std::ios::beg);
 	out.write(data.c_str(), data.size());
@@ -70,12 +70,35 @@ std::string FileServer::writeFile(const std::string &path, size_t offset, const 
 	return "OK " + std::to_string(data.size());
 }
 
-// Processes a request string from the client and returns the appropriate response.
+// Creates an empty file in storageDirectory using only the file's basename.
+std::string FileServer::createFile(const std::string &path)
+{
+	std::string fileName = getBaseName(path);
+	std::string fullPath = storageDirectory + "/" + fileName;
+	std::ofstream ofs(fullPath, std::ios::binary);
+	if (ofs)
+	{
+		ofs.close();
+		return "OK";
+	}
+	else
+		return "ERR CannotCreateFile";
+}
+
+// Deletes a file from storageDirectory using only the file's basename.
+std::string FileServer::deleteFile(const std::string &path)
+{
+	std::string fileName = getBaseName(path);
+	std::string fullPath = storageDirectory + "/" + fileName;
+	if (remove(fullPath.c_str()) == 0)
+		return "OK";
+	else
+		return "ERR CannotDeleteFile: " + std::string(strerror(errno));
+}
+
+// Handles incoming requests from the client.
 std::string FileServer::handleRequest(const std::string &request)
 {
-	// Expected formats:
-	// READ <path> <offset> <length>
-	// WRITE <path> <offset> <data>
 	std::istringstream iss(request);
 	std::string command;
 	iss >> command;
@@ -97,36 +120,22 @@ std::string FileServer::handleRequest(const std::string &request)
 	}
 	else if (command == "CREATE")
 	{
-		// Create an empty file.
 		std::string path;
 		iss >> path;
-
-		char cwd[100];
-		if (getcwd(cwd, sizeof(cwd)) == nullptr)
-		{
-			return "ERR CannotDetermineCWD";
-		}
-		// Construct the full path as: <cwd>/<storageDirectory>/<path>
-		std::string fullPath = std::string(cwd) + "/" + storageDirectory + path;
-		std::cout<<"Full path: "<<fullPath<<std::endl;
-		// If the provided file path does not begin with a '/', add one.
-		// if (!path.empty() && path[0] != '/')
-		// 	fullPath += "/" + path;
-		// else
-		// 	fullPath += path;
-
-		std::ofstream ofs(fullPath, std::ios::binary);
-		if (ofs)
-		{
-			ofs.close();
-			return "OK";
-		}
-		else
-		{
-			return "ERR CannotCreateFile";
-		}
+		return createFile(path);
 	}
-
+	else if (command == "DELETE")
+	{
+		std::string path;
+		iss >> path;
+		return deleteFile(path);
+	}
+	else if (command == "MKDIR")
+	{
+		// Although directories are not stored on file servers, we support this command
+		// so that the nameserver can use it for rollback if needed.
+		return "OK";
+	}
 	return "ERR UnknownCommand";
 }
 
@@ -143,13 +152,19 @@ void FileServer::processRequest(int clientSock)
 }
 
 // Runs the file server on the given port.
-// Before binding the socket, the storage directory is updated to include a port-specific subdirectory.
+// Updates storageDirectory by appending a port-specific subdirectory, then creates that folder.
 void FileServer::run(int port)
 {
 	// Append a port-specific subdirectory.
-	// storageDirectory = "/server" + std::to_string(port);
-	// Ensure the directory exists.
-	mkdir(storageDirectory.c_str(), 0777);
+	storageDirectory = storageDirectory + "/server" + std::to_string(port);
+	if (mkdir(storageDirectory.c_str(), 0777) != 0)
+	{
+		if (errno != EEXIST)
+		{
+			std::cerr << "FileServer: Failed to create storage directory: " << strerror(errno) << "\n";
+			return;
+		}
+	}
 
 	int sockfd, newsockfd;
 	struct sockaddr_in serv_addr, cli_addr;
