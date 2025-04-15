@@ -115,7 +115,8 @@ std::string FileServer::handleRequest(const std::string &request)
 		size_t offset;
 		iss >> path >> offset;
 		std::string data;
-		std::getline(iss, data);
+		std::getline(iss >> std::ws , data);
+		std::cout<<"Data to be written: "<<data<<std::endl;
 		return writeFile(path, offset, data);
 	}
 	else if (command == "CREATE")
@@ -156,15 +157,15 @@ void FileServer::processRequest(int clientSock)
 void FileServer::run(int port)
 {
 	// Append a port-specific subdirectory.
-	storageDirectory = storageDirectory + "/server" + std::to_string(port);
-	if (mkdir(storageDirectory.c_str(), 0777) != 0)
-	{
-		if (errno != EEXIST)
-		{
-			std::cerr << "FileServer: Failed to create storage directory: " << strerror(errno) << "\n";
-			return;
-		}
-	}
+	// storageDirectory = storageDirectory + "/server" + std::to_string(port);
+	// if (mkdir(storageDirectory.c_str(), 0777) != 0)
+	// {
+	// 	if (errno != EEXIST)
+	// 	{
+	// 		std::cerr << "FileServer: Failed to create storage directory: " << strerror(errno) << "\n";
+	// 		return;
+	// 	}
+	// }
 
 	int sockfd, newsockfd;
 	struct sockaddr_in serv_addr, cli_addr;

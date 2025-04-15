@@ -200,6 +200,8 @@ std::string NamespaceServer::listDirectory(const std::string &path)
 		return "ERR InvalidPath";
 
 	std::lock_guard<std::mutex> lock(nsMutex);
+
+	// Confirm that the directory exists.
 	bool found = false;
 	for (const auto &d : directories)
 	{
@@ -213,10 +215,32 @@ std::string NamespaceServer::listDirectory(const std::string &path)
 		return "ERR DirectoryNotFound";
 
 	std::ostringstream oss;
+
+	// List all direct child directories.
+	oss << "Directories:\n";
+	for (const auto &dir : directories)
+	{
+		if (dir == path)
+			continue; // Skip the directory itself.
+
+		// Check if 'dir' is an immediate child of 'path'
+		// Example: if path is "/home", then "/home/docs" qualifies but "/home/docs/reports" does not.
+		if (getParentDirectory(dir) == path)
+		{
+			oss << getBaseName(dir) << "\n";
+		}
+	}
+
+	// List all direct child files.
+	oss << "Files:\n";
 	for (const auto &pair : fileMapping)
 	{
-		if (pair.first.find(path) == 0)
-			oss << pair.first << "\n";
+		const std::string &filePath = pair.first;
+		// Use getParentDirectory to determine if the file is directly in 'path'.
+		if (getParentDirectory(filePath) == path)
+		{
+			oss << getBaseName(filePath) << "\n";
+		}
 	}
 	return oss.str();
 }
@@ -363,50 +387,57 @@ std::string NamespaceServer::deletePath(const std::string &path)
 	std::lock_guard<std::mutex> lock(nsMutex);
 	bool found = false;
 
-	// First, if the exact path exists as a file, delete it.
+	// Helper lambda to check if 'target' is the same as or a child (immediate or nested)
+	// of 'basePath' (e.g., "/foo" and "/foo/bar").
+	auto isUnderPath = [&](const std::string &target, const std::string &basePath) -> bool
+	{
+		if (target == basePath)
+			return true;
+		if (target.size() > basePath.size() && target.compare(0, basePath.size(), basePath) == 0 && target[basePath.size()] == '/')
+			return true;
+		return false;
+	};
+
+	// 1. If the given path exactly matches a file, delete it using its hashed name.
 	if (fileMapping.find(path) != fileMapping.end())
 	{
 		std::string serverId = fileMapping[path];
-		std::string base = getBaseName(path);
-		std::string fsResponse = forwardToFileServer("DELETE " + base, serverId);
+		std::string hashedFileName = computeSHA256(path);
+		std::string fsResponse = forwardToFileServer("DELETE " + hashedFileName, serverId);
 		if (fsResponse != "OK")
 			return fsResponse;
 		fileMapping.erase(path);
 		found = true;
 	}
 
-	// Next, if the path is a directory (or a parent of files/directories), delete recursively.
-	// Collect directories to delete: any directory that equals the given path or has it as a prefix
-	std::vector<std::string> dirsToDelete;
-	for (const auto &d : directories)
-	{
-		if (d == path || (d.size() > path.size() && d.substr(0, path.size()) == path && d[path.size()] == '/'))
-			dirsToDelete.push_back(d);
-	}
-
-	// Collect files to delete: any file whose full path equals the given path
-	// or starts with the given directory path followed by '/'
+	// 2. Recursively delete files that are under the given directory path.
 	std::vector<std::string> filesToDelete;
 	for (const auto &pair : fileMapping)
 	{
-		if (pair.first == path || (pair.first.size() > path.size() &&
-								   pair.first.substr(0, path.size()) == path && pair.first[path.size()] == '/'))
+		const std::string &filePath = pair.first;
+		if (isUnderPath(filePath, path))
 		{
-			filesToDelete.push_back(pair.first);
+			filesToDelete.push_back(filePath);
 		}
 	}
-
-	// For each file, instruct its file server to delete the file (using basename)
 	for (const auto &f : filesToDelete)
 	{
 		std::string serverId = fileMapping[f];
-		std::string base = getBaseName(f);
-		forwardToFileServer("DELETE " + base, serverId);
+		std::string hashedFileName = computeSHA256(f);
+		forwardToFileServer("DELETE " + hashedFileName, serverId);
 		fileMapping.erase(f);
 		found = true;
 	}
 
-	// Remove all directories in dirsToDelete from the directories vector and dirMapping.
+	// 3. Recursively remove directory metadata.
+	std::vector<std::string> dirsToDelete;
+	for (const auto &d : directories)
+	{
+		if (isUnderPath(d, path) && d != "/") // Avoid deleting root if not intended
+		{
+			dirsToDelete.push_back(d);
+		}
+	}
 	for (const auto &d : dirsToDelete)
 	{
 		auto it = std::find(directories.begin(), directories.end(), d);
@@ -425,7 +456,6 @@ std::string NamespaceServer::deletePath(const std::string &path)
 	saveMetadata();
 	return "OK";
 }
-
 // Forwards the given command to the appropriate file server.
 std::string NamespaceServer::forwardToFileServer(const std::string &cmd, const std::string &serverId)
 {
@@ -484,8 +514,8 @@ std::string NamespaceServer::handleRequest(const std::string &request)
 		iss >> path;
 		if (!isValidPath(path))
 			return "ERR InvalidPath";
-		std::string listing = listDirectory(path);
-		return (listing.rfind("ERR", 0) == 0) ? listing : ("DIR " + path + "\nFiles:\n" + listing);
+		// std::string listing = listDirectory(path);
+		return listDirectory(path);
 	}
 	else if (command == "CREATE_FILE")
 	{
@@ -494,29 +524,30 @@ std::string NamespaceServer::handleRequest(const std::string &request)
 		if (!isValidPath(path))
 			return "ERR InvalidPath";
 		std::string result = createFile(path);
-		if (result.substr(0, 3) != "OK ")
-			return result;
-		std::string serverId = result.substr(3);
-		std::string fsResponse = forwardToFileServer("CREATE " + path, serverId);
-		if (fsResponse == "OK")
-			return result;
-		else
-		{
-			{
-				std::lock_guard<std::mutex> lock(nsMutex);
-				fileMapping.erase(path);
-				for (auto &fs : fileServers)
-				{
-					if (fs.serverId == serverId && fs.fileCount > 0)
-					{
-						fs.fileCount--;
-						break;
-					}
-				}
-				saveMetadata();
-			}
-			return fsResponse;
-		}
+		return result;
+		// if (result.substr(0, 3) != "OK ")
+		// 	return result;
+		// std::string serverId = result.substr(3);
+		// std::string fsResponse = forwardToFileServer("CREATE " + path, serverId);
+		// if (fsResponse == "OK")
+		// 	return result;
+		// else
+		// {
+		// 	{
+		// 		std::lock_guard<std::mutex> lock(nsMutex);
+		// 		fileMapping.erase(path);
+		// 		for (auto &fs : fileServers)
+		// 		{
+		// 			if (fs.serverId == serverId && fs.fileCount > 0)
+		// 			{
+		// 				fs.fileCount--;
+		// 				break;
+		// 			}
+		// 		}
+		// 		saveMetadata();
+		// 	}
+		// 	return fsResponse;
+		// }
 	}
 	else if (command == "MKDIR")
 	{
@@ -564,6 +595,7 @@ std::string NamespaceServer::handleRequest(const std::string &request)
 			return "ERR InvalidPath";
 		std::string data;
 		std::getline(iss >> std::ws, data);
+		std::cout<<"Data received for write operation: "<<data<<std::endl;
 		auto it = fileMapping.find(path);
 		if (it == fileMapping.end())
 			return "ERR FileNotFound";
